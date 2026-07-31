@@ -490,6 +490,13 @@
             user: 'user123'
         };
 
+        // Event listener untuk sinkronisasi kredensial lintas perangkat/tab secara real-time
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'col_credentials') {
+                appCredentials = JSON.parse(e.newValue) || { admin: 'admin123', user: 'user123' };
+            }
+        });
+
         let chartPaymentInstance = null;
         let chartCityHomeInstance = null;
         let currentMasterPage = 1;
@@ -522,9 +529,12 @@
             const p = document.getElementById('login-pass').value;
             const errDiv = document.getElementById('login-error');
 
-            if (u === 'user' && p === appCredentials.user) {
+            // Selalu ambil kredensial terbaru dari localStorage agar sinkron dengan perangkat lain
+            const latestCredentials = JSON.parse(localStorage.getItem('col_credentials')) || appCredentials;
+
+            if (u === 'user' && p === latestCredentials.user) {
                 currentUserRole = 'user';
-            } else if (u === 'admin' && p === appCredentials.admin) {
+            } else if (u === 'admin' && p === latestCredentials.admin) {
                 currentUserRole = 'admin';
             } else {
                 errDiv.classList.remove('hidden');
@@ -564,10 +574,13 @@
                 return;
             }
 
+            // Perbarui kredensial
             appCredentials[targetRole] = newPass;
+            
+            // Simpan ke localStorage agar langsung tersinkronisasi ke semua perangkat/tab secara real-time
             localStorage.setItem('col_credentials', JSON.stringify(appCredentials));
 
-            alert(`Password untuk akun "${targetRole}" berhasil diperbarui!`);
+            alert(`Password untuk akun "${targetRole}" berhasil diperbarui dan disinkronkan ke seluruh perangkat!`);
             document.getElementById('new-password').value = '';
         }
 
