@@ -485,15 +485,21 @@
         let visits = JSON.parse(localStorage.getItem('col_visits')) || [];
         let currentUserRole = localStorage.getItem('col_current_role') || null;
         
+        // Menggunakan password tetap (hardcoded) sesuai permintaan: Admin: bandung123, User: supervisor123
         let appCredentials = JSON.parse(localStorage.getItem('col_credentials')) || {
-            admin: 'admin123',
-            user: 'user123'
+            admin: 'bandung123',
+            user: 'supervisor123'
         };
+
+        // Jika localStorage belum memiliki credential atau ingin dipaksa sinkron dengan password baru
+        if (!localStorage.getItem('col_credentials')) {
+            localStorage.setItem('col_credentials', JSON.stringify(appCredentials));
+        }
 
         // Event listener untuk sinkronisasi kredensial lintas perangkat/tab secara real-time
         window.addEventListener('storage', function(e) {
             if (e.key === 'col_credentials') {
-                appCredentials = JSON.parse(e.newValue) || { admin: 'admin123', user: 'user123' };
+                appCredentials = JSON.parse(e.newValue) || { admin: 'bandung123', user: 'supervisor123' };
             }
         });
 
