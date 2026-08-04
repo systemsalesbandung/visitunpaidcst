@@ -14,7 +14,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- Firebase SDK (v10.8.0 Compat API) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -538,11 +537,10 @@
 
     <!-- JAVASCRIPT CORE SCRIPT -->
     <script>
-        // 1. KONFIGURASI FIREBASE (Ganti dengan kredensial Realtime Database milik Anda)
+        // 1. KONFIGURASI FIREBASE (Ganti dengan kredensial milik Anda dari Firebase Console)
         const firebaseConfig = {
             apiKey: "API_KEY_ANDA",
             authDomain: "PROJECT_ID_ANDA.firebaseapp.com",
-            databaseURL: "https://PROJECT_ID_ANDA-default-rtdb.firebaseio.com",
             projectId: "PROJECT_ID_ANDA",
             storageBucket: "PROJECT_ID_ANDA.appspot.com",
             messagingSenderId: "SENDER_ID_ANDA",
@@ -553,19 +551,28 @@
         if (!firebase.apps.length) {
             firebase.initializeApp(firebaseConfig);
         }
-        const db = firebase.database();
         const storage = firebase.storage();
 
         const SHEETDB_URL = 'https://script.google.com/macros/s/AKfycbztUTRUueRONR1trPSmVmaej4wF1PWegGyTM4F_sj-qlES7V9nzyaYbTcP8px7FYIkm/exec';
 
-        let customers = [];
-        let visits = [];
+        let customers = JSON.parse(localStorage.getItem('col_customers')) || [];
+        let visits = JSON.parse(localStorage.getItem('col_visits')) || [];
         let currentUserRole = localStorage.getItem('col_current_role') || null;
         
-        let appCredentials = {
+        let appCredentials = JSON.parse(localStorage.getItem('col_credentials')) || {
             admin: 'bandung123',
             user: 'supervisor123'
         };
+
+        if (!localStorage.getItem('col_credentials')) {
+            localStorage.setItem('col_credentials', JSON.stringify(appCredentials));
+        }
+
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'col_credentials') {
+                appCredentials = JSON.parse(e.newValue) || { admin: 'bandung123', user: 'supervisor123' };
+            }
+        });
 
         let chartPaymentInstance = null;
         let chartCityHomeInstance = null;
@@ -573,56 +580,13 @@
         const rowsPerPage = 20;
 
         window.onload = function() {
-            // Sinkronisasi data realtime dari Firebase Realtime Database
-            initRealtimeSync();
-
             if (currentUserRole) {
                 document.getElementById('login-section').classList.add('hidden');
                 document.getElementById('app-container').classList.remove('hidden');
                 applyRoleAccess();
+                initApp();
             }
         };
-
-        // Fungsi Sinkronisasi Realtime Firebase Database agar status paid & data lainnya dapat dilihat oleh semua pengguna secara langsung
-        function initRealtimeSync() {
-            // Sinkronisasi Customer Data
-            db.ref('customers').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    customers = Object.values(data);
-                } else if (customers.length === 0) {
-                    // Jika database kosong, coba fetch dari Google Spreadsheet/Local
-                    fetchGoogleSheetData();
-                }
-                updateDashboard();
-                renderPaidTable();
-                renderUnpaidTable();
-                renderVisitTable();
-                if (currentUserRole === 'admin') renderMasterTable();
-            });
-
-            // Sinkronisasi Visit Log Data
-            db.ref('visits').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    visits = Object.values(data).sort((a, b) => b.id - a.id);
-                } else {
-                    visits = [];
-                }
-                updateDashboard();
-                renderVisitTable();
-            });
-
-            // Sinkronisasi Credentials / Password
-            db.ref('credentials').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    appCredentials = data;
-                } else {
-                    db.ref('credentials').set(appCredentials);
-                }
-            });
-        }
 
         function togglePasswordVisibility() {
             const passInput = document.getElementById('login-pass');
@@ -642,9 +606,11 @@
             const p = document.getElementById('login-pass').value;
             const errDiv = document.getElementById('login-error');
 
-            if (u === 'user' && p === appCredentials.user) {
+            const latestCredentials = JSON.parse(localStorage.getItem('col_credentials')) || appCredentials;
+
+            if (u === 'user' && p === latestCredentials.user) {
                 currentUserRole = 'user';
-            } else if (u === 'admin' && p === appCredentials.admin) {
+            } else if (u === 'admin' && p === latestCredentials.admin) {
                 currentUserRole = 'admin';
             } else {
                 errDiv.classList.remove('hidden');
@@ -657,6 +623,7 @@
             document.getElementById('app-container').classList.remove('hidden');
             
             applyRoleAccess();
+            initApp();
         }
 
         function handleLogout() {
@@ -684,14 +651,10 @@
             }
 
             appCredentials[targetRole] = newPass;
-            
-            // Simpan ke Firebase Realtime Database agar ter-update untuk semua pengguna
-            db.ref('credentials').set(appCredentials).then(() => {
-                alert(`Password untuk akun "${targetRole}" berhasil diperbarui dan disinkronkan ke seluruh perangkat!`);
-                document.getElementById('new-password').value = '';
-            }).catch(err => {
-                alert('Gagal memperbarui password ke database.');
-            });
+            localStorage.setItem('col_credentials', JSON.stringify(appCredentials));
+
+            alert(`Password untuk akun "${targetRole}" berhasil diperbarui dan disinkronkan ke seluruh perangkat!`);
+            document.getElementById('new-password').value = '';
         }
 
         function applyRoleAccess() {
@@ -757,6 +720,18 @@
             else if (tabId === 'customers') renderMasterTable();
         }
 
+        async function initApp() {
+            if (customers.length === 0) {
+                await fetchGoogleSheetData();
+            } else {
+                updateDashboard();
+                renderPaidTable();
+                renderUnpaidTable();
+                renderVisitTable();
+                if (currentUserRole === 'admin') renderMasterTable();
+            }
+        }
+
         async function fetchGoogleSheetData() {
             try {
                 const response = await fetch(SHEETDB_URL);
@@ -764,34 +739,44 @@
                 const json = await response.json();
                 if (json.length === 0) return;
 
-                let newCustomersObj = {};
                 json.forEach((row, index) => {
                     const invNo = formatText(row['Invoice Number'] || row['invoiceNo'] || ('INV/' + (2026000 + index)));
-                    const custId = Date.now() + index;
-                    
-                    newCustomersObj[custId] = {
-                        id: custId,
-                        customer: formatText(row['Customer'] || row['customer'] || 'Customer ' + (index + 1)),
-                        saMonth: formatText(row['SA Month'] || '2026-01'),
-                        cityHome: formatText(row['City Homepass'] || row['cityHome'] || '-'),
-                        citySales: formatText(row['City Sales'] || '-'),
-                        salesCode: formatText(row['Sales Code'] || '-'),
-                        salesName: formatText(row['Sales Name'] || row['salesName'] || '-'),
-                        microBloc: formatText(row['Micro Block ID'] || '-'),
-                        spvZone: formatText(row['SPV Zone'] || '-'),
-                        spvName: formatText(row['SPV Name'] || row['spvName'] || '-'),
-                        region: formatText(row['Region'] || 'General'),
-                        acqChan: formatText(row['Acq Channel'] || '-'),
-                        billingCyc: formatText(row['Billing Cycle'] || 'Monthly'),
-                        invoiceNo: invNo,
-                        paymentStatus: formatText(row['Payment Status'] || row['paymentStatus'] || 'Unpaid')
-                    };
+                    const isExist = customers.some(c => String(c.invoiceNo).toLowerCase() === String(invNo).toLowerCase());
+
+                    if (!isExist) {
+                        customers.push({
+                            id: Date.now() + index,
+                            customer: formatText(row['Customer'] || row['customer'] || 'Customer ' + (index + 1)),
+                            saMonth: formatText(row['SA Month'] || '2026-01'),
+                            cityHome: formatText(row['City Homepass'] || row['cityHome'] || '-'),
+                            citySales: formatText(row['City Sales'] || '-'),
+                            salesCode: formatText(row['Sales Code'] || '-'),
+                            salesName: formatText(row['Sales Name'] || row['salesName'] || '-'),
+                            microBloc: formatText(row['Micro Block ID'] || '-'),
+                            spvZone: formatText(row['SPV Zone'] || '-'),
+                            spvName: formatText(row['SPV Name'] || row['spvName'] || '-'),
+                            region: formatText(row['Region'] || 'General'),
+                            acqChan: formatText(row['Acq Channel'] || '-'),
+                            billingCyc: formatText(row['Billing Cycle'] || 'Monthly'),
+                            invoiceNo: invNo,
+                            paymentStatus: formatText(row['Payment Status'] || row['paymentStatus'] || 'Unpaid')
+                        });
+                    }
                 });
 
-                // Simpan ke Firebase Database agar langsung tersinkronisasi secara global
-                await db.ref('customers').set(newCustomersObj);
+                saveDataLocally();
+                updateDashboard();
+                renderPaidTable();
+                renderUnpaidTable();
+                renderVisitTable();
+                if(currentUserRole === 'admin') renderMasterTable();
             } catch (err) {
                 console.error(err);
+                updateDashboard();
+                renderPaidTable();
+                renderUnpaidTable();
+                renderVisitTable();
+                if(currentUserRole === 'admin') renderMasterTable();
             }
         }
 
@@ -812,19 +797,15 @@
                     const jsonRows = XLSX.utils.sheet_to_json(worksheet);
 
                     if (jsonRows.length === 0) return;
-
-                    let updatedCustomersMap = {};
-                    customers.forEach(c => { updatedCustomersMap[c.id] = c; });
-
                     let newCount = 0;
+
                     jsonRows.forEach((row, index) => {
                         const invNo = formatText(row['Invoice Number'] || row['invoiceNo'] || ('INV/' + (2026000 + index)));
-                        const isExist = Object.values(updatedCustomersMap).some(c => String(c.invoiceNo).toLowerCase() === String(invNo).toLowerCase());
+                        const isExist = customers.some(c => String(c.invoiceNo).toLowerCase() === String(invNo).toLowerCase());
 
                         if (!isExist) {
-                            const custId = Date.now() + index;
-                            updatedCustomersMap[custId] = {
-                                id: custId,
+                            customers.push({
+                                id: Date.now() + index,
                                 customer: formatText(row['Customer'] || row['customer'] || 'Customer ' + (index + 1)),
                                 saMonth: formatText(row['SA Month'] || '2026-01'),
                                 cityHome: formatText(row['City Homepass'] || row['cityHome'] || '-'),
@@ -839,15 +820,14 @@
                                 billingCyc: formatText(row['Billing Cycle'] || 'Monthly'),
                                 invoiceNo: invNo,
                                 paymentStatus: formatText(row['Payment Status'] || row['paymentStatus'] || 'Unpaid')
-                            };
+                            });
                             newCount++;
                         }
                     });
 
-                    db.ref('customers').set(updatedCustomersMap).then(() => {
-                        alert(`Upload Excel selesai! Data baru ditambahkan: ${newCount}`);
-                        switchTab('dashboard');
-                    });
+                    saveDataLocally();
+                    alert(`Upload Excel selesai! Data baru ditambahkan: ${newCount}`);
+                    switchTab('dashboard');
                 } catch (err) {
                     alert('Gagal membaca file Excel.');
                 }
@@ -880,6 +860,15 @@
                     body: JSON.stringify({ action: "delete", invoiceNo: invoiceNo })
                 });
             } catch (err) { console.error('Gagal menghapus dari cloud:', err); }
+        }
+
+        function saveDataLocally(specificCustomer = null) {
+            localStorage.setItem('col_customers', JSON.stringify(customers));
+            localStorage.setItem('col_visits', JSON.stringify(visits));
+            updateDashboard();
+            if (specificCustomer) {
+                syncToGoogleSheetOnline(specificCustomer);
+            }
         }
 
         function updateDashboard() {
@@ -1135,7 +1124,6 @@
             const custId = parseInt(document.getElementById('edit-cust-id').value);
             const cust = customers.find(c => c.id === custId);
             if (!cust) return;
-            
             cust.customer = formatText(document.getElementById('edit-cust-name').value);
             cust.invoiceNo = formatText(document.getElementById('edit-cust-invoice').value);
             cust.cityHome = formatText(document.getElementById('edit-cust-cityhome').value);
@@ -1143,23 +1131,27 @@
             cust.spvName = formatText(document.getElementById('edit-cust-spv').value);
             cust.paymentStatus = formatText(document.getElementById('edit-cust-status').value);
 
-            // Update ke Firebase Realtime Database
-            db.ref('customers/' + cust.id).set(cust).then(() => {
-                syncToGoogleSheetOnline(cust);
-                closeEditCustomerModal();
-                alert('Data berhasil diperbarui & disinkronkan secara global!');
-            });
+            saveDataLocally(cust);
+            closeEditCustomerModal();
+            renderMasterTable();
+            renderPaidTable();
+            renderUnpaidTable();
+            alert('Data berhasil diperbarui & disinkronkan ke Cloud!');
         }
 
         function deleteCustomer(custId) {
             if(currentUserRole !== 'admin') return;
-            const cust = customers.find(c => c.id === custId);
-            if (!cust) return;
+            const index = customers.findIndex(c => c.id === custId);
+            if (index === -1) return;
+            const cust = customers[index];
             if (confirm(`Hapus data customer "${cust.customer}"?`)) {
-                db.ref('customers/' + custId).remove().then(() => {
-                    deleteFromGoogleSheetOnline(cust.invoiceNo);
-                    alert('Data berhasil dihapus dari sistem.');
-                });
+                customers.splice(index, 1);
+                saveDataLocally();
+                deleteFromGoogleSheetOnline(cust.invoiceNo);
+                renderMasterTable();
+                renderPaidTable();
+                renderUnpaidTable();
+                updateDashboard();
             }
         }
 
@@ -1188,7 +1180,7 @@
 
         function closeVisitModal() { document.getElementById('visit-modal').classList.add('hidden'); }
 
-        // FUNGSI SUBMIT VISIT DENGAN INTEGRASI FIREBASE REALTIME DATABASE & STORAGE
+        // FUNGSI SUBMIT VISIT DENGAN INTEGRASI UPLOAD FIREBASE STORAGE
         async function submitVisit(event) {
             event.preventDefault();
 
@@ -1216,8 +1208,11 @@
                         const fileName = `visits/${Date.now()}_${file.name}`;
                         const storageRef = storage.ref(fileName);
                         
+                        // Unggah file ke Firebase Storage
                         const snapshot = await storageRef.put(file);
+                        // Dapatkan URL Publik Permanen
                         const downloadURL = await snapshot.ref.getDownloadURL();
+                        
                         photosArray.push(downloadURL);
                     }
                 } catch (error) {
@@ -1234,9 +1229,8 @@
                 photosArray = ['https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=300'];
             }
 
-            const visitId = Date.now();
-            const newVisit = {
-                id: visitId,
+            visits.unshift({
+                id: Date.now(),
                 datetime: datetimeStr,
                 customer: cust ? cust.customer : 'Manual Customer',
                 invoice: cust ? cust.invoiceNo : '-',
@@ -1246,21 +1240,21 @@
                 statusHasil: statusHasil,
                 remark: remark,
                 photos: photosArray
-            };
+            });
 
-            // Simpan log visit ke Firebase Realtime Database
-            await db.ref('visits/' + visitId).set(newVisit);
-
-            // Update status payment customer jika terikat
             if (cust) {
                 cust.paymentStatus = statusHasil;
-                await db.ref('customers/' + cust.id).set(cust);
-                syncToGoogleSheetOnline(cust);
+                saveDataLocally(cust);
+            } else {
+                saveDataLocally();
             }
 
             closeVisitModal();
+            renderVisitTable();
+            renderPaidTable();
+            renderUnpaidTable();
+            if(currentUserRole === 'admin') renderMasterTable();
             switchTab('visit');
-            alert('Kunjungan & status berhasil disimpan dan disinkronkan secara realtime untuk seluruh pengguna!');
         }
 
         function renderVisitTable() {
@@ -1316,9 +1310,9 @@
 
         function clearAllData() {
             if(currentUserRole !== 'admin') return;
-            if (confirm('Reset semua data database cloud?')) {
-                db.ref('customers').remove();
-                db.ref('visits').remove();
+            if (confirm('Reset semua data lokal?')) {
+                localStorage.clear();
+                customers = []; visits = [];
                 fetchGoogleSheetData();
             }
         }
